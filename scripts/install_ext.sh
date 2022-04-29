@@ -1,3 +1,4 @@
+export NVCCFLAGS=-arch=sm_70
 cd raymarching
 pip install .
 cd ..
