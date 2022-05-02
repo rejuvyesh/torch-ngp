@@ -34,6 +34,8 @@ if __name__ == '__main__':
     parser.add_argument('--ff', action='store_true', help="use fully-fused MLP")
     parser.add_argument('--tcnn', action='store_true', help="use TCNN backend")
 
+    parser.add_argument('--xyzencoder', type=str, default='hashgrid', help="specify encoder type")
+
     ### dataset options
     parser.add_argument('--mode', type=str, default='colmap', help="dataset mode, supports (colmap, blender)")
     parser.add_argument('--color_space', type=str, default='srgb', help="Color space, supports (linear, srgb)")
@@ -82,7 +84,7 @@ if __name__ == '__main__':
     seed_everything(opt.seed)
 
     model = NeRFNetwork(
-        encoding="hashgrid",
+        encoding=opt.xyzencoder,
         bound=opt.bound,
         cuda_ray=opt.cuda_ray,
         density_scale=1,
