@@ -21,6 +21,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader
+import torch.utils.tensorboard
 
 import trimesh
 import mcubes
@@ -514,7 +515,7 @@ class Trainer(object):
 
     def train(self, train_loader, valid_loader, max_epochs):
         if self.use_tensorboardX and self.local_rank == 0:
-            self.writer = tensorboardX.SummaryWriter(os.path.join(self.workspace, "run", self.name))
+            self.writer = torch.utils.tensorboard.SummaryWriter(os.path.join(self.workspace, "run", self.name))
 
         # mark untrained region (i.e., not covered by any camera from the training dataset)
         if self.model.cuda_ray:
