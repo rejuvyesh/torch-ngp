@@ -64,7 +64,7 @@ class NeRFModel(pl.LightningModule):
     def training_step_end(self, step_output):
         self.log("train/loss", step_output["loss"].detach())
         self.train_psnr(step_output["pred"], step_output["gt"])
-        self.log("train/psnr", self.train_psnr, on_epoch=True)
+        self.log("train/psnr", self.train_psnr, prog_bar=True)
 
     def validation_step(self, data, batch_idx):
         rays_o = data['rays_o'] # [B, N, 3]
@@ -90,7 +90,7 @@ class NeRFModel(pl.LightningModule):
     def validation_step_end(self, step_output):
         self.log("valid/loss", step_output["loss"].detach())
         self.valid_psnr(step_output["pred_rgb"], step_output["gt_rgb"])
-        self.log("valid/psnr", self.train_psnr, on_epoch=True)
+        self.log("valid/psnr", self.train_psnr, prog_bar=True)
 
 
     def configure_optimizers(self):

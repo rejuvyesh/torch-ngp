@@ -87,7 +87,9 @@ def main():
     logger = TensorBoardLogger(save_dir=os.path.join(opt.workspace, "logs"),
                                name="ngp",
                                default_hp_metric=False)
-    trainer = pl.Trainer(default_root_dir=opt.workspace, max_steps=opt.iters, logger=logger,  callbacks=callbacks,
+    trainer = pl.Trainer(default_root_dir=opt.workspace, max_steps=opt.iters, 
+                        check_val_every_n_epoch=50,
+                        logger=logger, callbacks=callbacks,
                         accelerator='gpu', devices=1, strategy=None, precision=16 if opt.fp16 else 32)
     trainer.fit(mod, train_dataloader, valid_dataloader)
 
