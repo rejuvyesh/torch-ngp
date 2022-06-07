@@ -3,12 +3,13 @@ import argparse
 import os.path
 
 from nerf.provider import NeRFDataset
-from nerf.pltrainer import NeRFModel
+from nerf.pltrainer import NeRFModel, RenderMeshCallback
 
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
+from pytorch_lightning.callbacks import Callback, ModelCheckpoint, TQDMProgressBar, LearningRateMonitor, Timer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.seed import seed_everything
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -48,6 +49,8 @@ def main():
     parser.add_argument('--clip_text', type=str, default='', help="text input for CLIP guidance")
     parser.add_argument('--rand_pose', type=int, default=-1, help="<0 uses no rand pose, =0 only uses rand pose, >0 sample one rand pose every $ known poses")
 
+    parser.add_argument('--ema_decay', default=None, type=float, help="EMA decay of model weights")
+
     opt = parser.parse_args()
     if opt.O:
         opt.fp16 = True
@@ -81,17 +84,26 @@ def main():
     valid_dataloader = NeRFDataset(opt, device=device, type='val', downscale=1).dataloader()
     mod = NeRFModel(model, criterion, opt)
 
-    ckpt_cb = ModelCheckpoint(dirpath=os.path.join(opt.workspace, "checkpoints"), filename='{epoch:d}.pth.tar', monitor='valid/psnr', mode='max', save_top_k=-1)
+    ckpt_cb = ModelCheckpoint(dirpath=os.path.join(opt.workspace, "checkpoints"), filename='{epoch:d}', monitor='valid/psnr', mode='max', save_top_k=-1)
     pbar = TQDMProgressBar(refresh_rate=1)
-    callbacks = [ckpt_cb, pbar]    
+    lrmon = LearningRateMonitor(logging_interval='step')
+    tmon = Timer(interval='epoch')
+    mesh_cb = RenderMeshCallback(dirpath=os.path.join(opt.workspace, "meshes"), name="ngp")
+    callbacks = [ckpt_cb, pbar, lrmon, tmon, mesh_cb]    
     logger = TensorBoardLogger(save_dir=os.path.join(opt.workspace, "logs"),
                                name="ngp",
                                default_hp_metric=False)
     trainer = pl.Trainer(default_root_dir=opt.workspace, max_steps=opt.iters, 
                         check_val_every_n_epoch=50,
                         logger=logger, callbacks=callbacks,
-                        accelerator='gpu', devices=1, strategy=None, precision=16 if opt.fp16 else 32)
-    trainer.fit(mod, train_dataloader, valid_dataloader)
+                        accelerator='gpu', devices=1, strategy=None, precision=16 if opt.fp16 else 32, track_grad_norm=2)
+
+    if opt.test:
+        test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
+        trainer.test(mod, test_loader)
+    else:
+        trainer.fit(mod, train_dataloader, valid_dataloader)
+    
 
 if __name__ == "__main__":
     main()

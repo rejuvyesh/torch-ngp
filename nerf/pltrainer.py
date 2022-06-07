@@ -1,7 +1,70 @@
+from typing import Optional
+
+import os
 import torch
 
+import imageio
+import trimesh
 import torchmetrics
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
+
+from torch_ema import ExponentialMovingAverage
+
+from nerf.utils import extract_geometry
+
+class RenderCallback(Callback):
+    def __init__(self, dirpath, name):
+        self.dirpath = dirpath
+        self.name = name
+        os.makedirs(dirpath, exist_ok=True)
+
+    def on_validation_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        return 
+        
+class RenderMeshCallback(Callback):
+    def __init__(self, dirpath, name, resolution=256, threshold=10) -> None:
+        super().__init__()
+        self.dirpath = dirpath
+        self.name = name
+        self.resolution = resolution
+        self.threshold = threshold
+        os.makedirs(dirpath, exist_ok=True)
+
+    def save_mesh(self, pl_module, path):
+        def query_func(pts):
+            with torch.no_grad():
+                with torch.cuda.amp.autocast(enabled=pl_module.hparams.fp16):
+                    sigma = pl_module.model.density(pts.to(pl_module.device))['sigma']
+            return sigma
+
+        vertices, triangles = extract_geometry(pl_module.model.aabb_infer[:3], pl_module.model.aabb_infer[3:], resolution=self.resolution, threshold=self.threshold, query_func=query_func)            
+        mesh = trimesh.Trimesh(vertices, triangles, process=False) # important, process=True leads to seg fault...
+        mesh.export(path)
+
+    def on_train_end(self, trainer, pl_module):
+        path = os.path.join(self.dirpath, f'{self.name}_{pl_module.current_epoch}.ply')
+        self.save_mesh(pl_module=pl_module, path=path)
+
+class RenderGifCallback(Callback):
+    def __init__(self, dirpath, name, dataloader) -> None:
+        super().__init__()
+        self.dirpath = dirpath
+        self.name = name
+        self.dataloader = dataloader
+
+    def save_gif(self, pl_module, path):
+        local_step = 0
+        if pl_module.model.cuda_ray:
+            with torch.cuda.amp.autocast(enabled=self.fp16):
+                self.model.update_extra_state()
+
+        
+        imageio.mimsave(path, imgs, fps=30)
+    def on_train_end(self, trainer, pl_module):
+        path = os.path.joint(self.dirpath, f'{self.name}_{pl_module.current_epoch}.gif')
+        self.save_gif(pl_module=pl_module, path=path)
 
 
 class NeRFModel(pl.LightningModule):
@@ -10,7 +73,10 @@ class NeRFModel(pl.LightningModule):
         self.save_hyperparameters(hparams)
         self.model = model
         self.criterion = criterion
-
+        if hparams.ema_decay is not None:
+            self.ema = ExponentialMovingAverage(self.model.parameters(), decay=hparams.ema_decay)
+        else:
+            self.ema = None
         self.train_psnr = torchmetrics.PeakSignalNoiseRatio()
         self.valid_psnr = torchmetrics.PeakSignalNoiseRatio()
 
@@ -65,6 +131,23 @@ class NeRFModel(pl.LightningModule):
         self.log("train/loss", step_output["loss"].detach())
         self.train_psnr(step_output["pred"], step_output["gt"])
         self.log("train/psnr", self.train_psnr, prog_bar=True)
+
+    def on_training_epoch_end(self):
+        if self.ema is not None:
+            self.ema.update()
+
+        return super().on_training_epoch_end()
+
+    def on_validation_epoch_start(self) -> None:
+        if self.ema is not None:
+            self.ema.store()
+            self.ema.copy_to()
+
+    def on_validation_epoch_end(self) -> None:
+        if self.ema is not None:
+            self.ema.restore()
+
+        return super().on_validation_epoch_end()
 
     def validation_step(self, data, batch_idx):
         rays_o = data['rays_o'] # [B, N, 3]
